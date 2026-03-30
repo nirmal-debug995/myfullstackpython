@@ -3,13 +3,23 @@ pipeline {
 
     environment {
         VENV_DIR = "${WORKSPACE}/venv"
-        APP_PORT = "5000"
+        APP_PORT = 5000
     }
 
     stages {
+
         stage('Checkout SCM') {
             steps {
-                checkout scm
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [],
+                    userRemoteConfigs: [[
+                        url: 'git@github.com:nirmal-debug995/myfullstackpython.git',
+                        credentialsId: 'github-ssh-key'
+                    ]]
+                ])
             }
         }
 
@@ -17,22 +27,20 @@ pipeline {
             steps {
                 sh '''
                 #!/bin/bash
-                set -e  # fail on real errors
-                set -x  # print commands for debugging
+                set -e
+                set -x
 
-                # Remove old virtualenv if exists
+                # Remove old venv
                 rm -rf "${VENV_DIR}"
 
-                # Create virtual environment
+                # Create virtualenv
                 python3 -m venv "${VENV_DIR}"
 
                 # Activate virtualenv
                 source "${VENV_DIR}/bin/activate"
 
-                # Upgrade pip (ignore minor failures)
-                pip install --upgrade pip || true
-
-                # Install required Python packages
+                # Upgrade pip and install requirements
+                pip install --upgrade pip
                 pip install -r requirements.txt
                 '''
             }
@@ -42,14 +50,14 @@ pipeline {
             steps {
                 sh '''
                 #!/bin/bash
-                set +e  # don't fail if no process is running
+                set +e  # allow command to fail if nothing is running
 
                 OLD_PID=$(lsof -t -i:${APP_PORT})
                 if [ -n "$OLD_PID" ]; then
-                    echo "Stopping old Flask process: $OLD_PID"
+                    echo "Stopping old app (PID $OLD_PID)..."
                     kill -9 $OLD_PID
                 else
-                    echo "No old process found on port ${APP_PORT}"
+                    echo "No existing app running on port ${APP_PORT}"
                 fi
                 '''
             }
@@ -60,15 +68,13 @@ pipeline {
                 sh '''
                 #!/bin/bash
                 set -e
-                set -x
 
-                # Activate virtualenv
+                # Activate venv
                 source "${VENV_DIR}/bin/activate"
 
-                # Start Flask app in background (logging output)
-                nohup python3 app.py > flask.log 2>&1 &
-
-                echo "Flask app started on port ${APP_PORT}. Logs: ${WORKSPACE}/flask.log"
+                # Start Flask app with Gunicorn + Eventlet
+                gunicorn -w 1 -k eventlet -b 0.0.0.0:${APP_PORT} app:app &
+                echo "App started on port ${APP_PORT}"
                 '''
             }
         }
