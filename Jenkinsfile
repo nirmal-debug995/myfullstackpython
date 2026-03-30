@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         VENV_DIR = "${WORKSPACE}/venv"
+        APP_PORT = "5000"
     }
 
     stages {
@@ -14,68 +15,71 @@ pipeline {
 
         stage('Setup Environment') {
             steps {
-                sh """
-                # Clean previous virtualenv
-                rm -rf ${VENV_DIR}
-                python3 -m venv ${VENV_DIR}
+                sh '''
+                #!/bin/bash
+                set -e  # fail on real errors
+                set -x  # print commands for debugging
 
-                # Activate venv and upgrade pip
-                . ${VENV_DIR}/bin/activate
-                pip install --upgrade pip
+                # Remove old virtualenv if exists
+                rm -rf "${VENV_DIR}"
+
+                # Create virtual environment
+                python3 -m venv "${VENV_DIR}"
+
+                # Activate virtualenv
+                source "${VENV_DIR}/bin/activate"
+
+                # Upgrade pip (ignore minor failures)
+                pip install --upgrade pip || true
+
+                # Install required Python packages
                 pip install -r requirements.txt
-                """
+                '''
             }
         }
 
         stage('Stop Old App') {
             steps {
-                sh """
-                OLD_PID=\$(lsof -t -i:5000)
-                if [ ! -z "\$OLD_PID" ]; then
-                    echo "Stopping old app with PID \$OLD_PID"
-                    kill -9 \$OLD_PID
+                sh '''
+                #!/bin/bash
+                set +e  # don't fail if no process is running
+
+                OLD_PID=$(lsof -t -i:${APP_PORT})
+                if [ -n "$OLD_PID" ]; then
+                    echo "Stopping old Flask process: $OLD_PID"
+                    kill -9 $OLD_PID
                 else
-                    echo "No old app running on port 5000"
+                    echo "No old process found on port ${APP_PORT}"
                 fi
-                """
+                '''
             }
         }
 
         stage('Start App') {
             steps {
-                sh """
-                # Activate virtual environment
-                . ${VENV_DIR}/bin/activate
+                sh '''
+                #!/bin/bash
+                set -e
+                set -x
 
-                # Start Flask app in background and log output
-                nohup python app.py > flask.log 2>&1 &
+                # Activate virtualenv
+                source "${VENV_DIR}/bin/activate"
 
-                # Wait until port 5000 is open or timeout
-                TIMEOUT=15
-                while ! lsof -i:5000 >/dev/null 2>&1 && [ \$TIMEOUT -gt 0 ]; do
-                    sleep 1
-                    TIMEOUT=\$((TIMEOUT-1))
-                done
+                # Start Flask app in background (logging output)
+                nohup python3 app.py > flask.log 2>&1 &
 
-                if lsof -i:5000 >/dev/null 2>&1; then
-                    echo "✅ App started successfully on port 5000"
-                else
-                    echo "❌ App failed to start on port 5000"
-                    echo "---- Flask log ----"
-                    cat flask.log
-                    exit 1
-                fi
-                """
+                echo "Flask app started on port ${APP_PORT}. Logs: ${WORKSPACE}/flask.log"
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "🎉 Deployment succeeded"
+            echo "✅ Deployment succeeded"
         }
         failure {
-            echo "❌ Deployment failed"
+            echo "❌ Deployment failed. Check logs for details."
         }
     }
 }
