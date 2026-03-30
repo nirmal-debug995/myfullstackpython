@@ -56,7 +56,7 @@ pipeline {
                     . $VENV_DIR/bin/activate
 
                     # Start Flask app in background
-                    nohup python app.py > flask.log 2>&1 &
+                    nohup python app.py --host=0.0.0.0 --port=5000 > flask.log 2>&1 &
                     echo "Flask app started on port $PORT"
                 '''
             }
