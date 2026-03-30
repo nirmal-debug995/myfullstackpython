@@ -2,46 +2,34 @@ pipeline {
     agent any
 
     environment {
-        VENV_DIR = "${WORKSPACE}/venv"
-        APP_PORT = 5000
+        VENV_PATH = "${WORKSPACE}/venv"
+        APP_PATH = "${WORKSPACE}/app.py"
+        PYTHON = "python3"
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    doGenerateSubmoduleConfigurations: false,
-                    extensions: [],
-                    userRemoteConfigs: [[
-                        url: 'git@github.com:nirmal-debug995/myfullstackpython.git',
-                        credentialsId: 'github-ssh-key'
-                    ]]
-                ])
+                checkout scm
             }
         }
 
         stage('Setup Environment') {
             steps {
                 sh '''
-                #!/bin/bash
-                set -e
-                set -x
-
-                # Remove old venv
-                rm -rf "${VENV_DIR}"
-
-                # Create virtualenv
-                python3 -m venv "${VENV_DIR}"
-
-                # Activate virtualenv
-                source "${VENV_DIR}/bin/activate"
-
-                # Upgrade pip and install requirements
-                pip install --upgrade pip
-                pip install -r requirements.txt
+                    set -e
+                    set -x
+                    # Remove old virtual environment
+                    rm -rf $VENV_PATH
+                    # Create new virtual environment
+                    $PYTHON -m venv $VENV_PATH
+                    # Activate venv (POSIX-compliant)
+                    . $VENV_PATH/bin/activate
+                    # Upgrade pip and install dependencies
+                    pip install --upgrade pip
+                    if [ -f requirements.txt ]; then
+                        pip install -r requirements.txt
+                    fi
                 '''
             }
         }
@@ -49,16 +37,8 @@ pipeline {
         stage('Stop Old App') {
             steps {
                 sh '''
-                #!/bin/bash
-                set +e  # allow command to fail if nothing is running
-
-                OLD_PID=$(lsof -t -i:${APP_PORT})
-                if [ -n "$OLD_PID" ]; then
-                    echo "Stopping old app (PID $OLD_PID)..."
-                    kill -9 $OLD_PID
-                else
-                    echo "No existing app running on port ${APP_PORT}"
-                fi
+                    # Optional: stop old Flask/Sockets app if running
+                    pkill -f "python.*app.py" || true
                 '''
             }
         }
@@ -66,26 +46,20 @@ pipeline {
         stage('Start App') {
             steps {
                 sh '''
-                #!/bin/bash
-                set -e
-
-                # Activate venv
-                source "${VENV_DIR}/bin/activate"
-
-                # Start Flask app with Gunicorn + Eventlet
-                gunicorn -w 1 -k eventlet -b 0.0.0.0:${APP_PORT} app:app &
-                echo "App started on port ${APP_PORT}"
+                    . $VENV_PATH/bin/activate
+                    nohup $PYTHON $APP_PATH > app.log 2>&1 &
+                    echo "Flask app started in background, logs: app.log"
                 '''
             }
         }
     }
 
     post {
-        success {
-            echo "✅ Deployment succeeded"
-        }
         failure {
             echo "❌ Deployment failed. Check logs for details."
+        }
+        success {
+            echo "✅ Deployment succeeded."
         }
     }
 }
