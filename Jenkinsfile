@@ -2,21 +2,18 @@ pipeline {
     agent any
 
     environment {
-        APP_DIR = "/var/lib/jenkins/workspace/Flask-chat-app"
-        VENV_DIR = "${APP_DIR}/venv"
         APP_PORT = "5000"
-        LOG_FILE = "${APP_DIR}/flask.log"
-        CRED_ID = "github-ssh-key" // Your Jenkins SSH credential ID
+        APP_DIR = "/var/lib/jenkins/workspace/Flask-chat-app"
     }
 
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout Code') {
             steps {
-                checkout([$class: 'GitSCM', 
+                checkout([$class: 'GitSCM',
                     branches: [[name: '*/main']],
                     userRemoteConfigs: [[
                         url: 'git@github.com:nirmal-debug995/myfullstackpython.git',
-                        credentialsId: "${CRED_ID}"
+                        credentialsId: 'github-ssh-key'
                     ]]
                 ])
             }
@@ -26,9 +23,9 @@ pipeline {
             steps {
                 sh """
                     cd ${APP_DIR}
-                    rm -rf ${VENV_DIR}
-                    python3 -m venv ${VENV_DIR}
-                    . ${VENV_DIR}/bin/activate
+                    rm -rf venv
+                    python3 -m venv venv
+                    . venv/bin/activate
                     pip install --upgrade pip
                     pip install -r requirements.txt
                 """
@@ -38,7 +35,7 @@ pipeline {
         stage('Stop Old App') {
             steps {
                 sh """
-                    OLD_PID=\$(lsof -t -i:${APP_PORT})
+                    OLD_PID=\$(lsof -t -i:${APP_PORT} || true)
                     if [ ! -z "\$OLD_PID" ]; then
                         kill -9 \$OLD_PID
                         echo "Stopped old app with PID \$OLD_PID"
@@ -53,9 +50,15 @@ pipeline {
             steps {
                 sh """
                     cd ${APP_DIR}
-                    . ${VENV_DIR}/bin/activate
-                    nohup python app.py --host=0.0.0.0 --port=${APP_PORT} > ${LOG_FILE} 2>&1 &
-                    echo "Flask app started on port ${APP_PORT}, logs in ${LOG_FILE}"
+                    . venv/bin/activate
+                    nohup python app.py --host=0.0.0.0 --port=${APP_PORT} > flask.log 2>&1 &
+                    sleep 5  # wait a bit for the app to start
+                    if lsof -i:${APP_PORT}; then
+                        echo "App started successfully on port ${APP_PORT}"
+                    else
+                        echo "App failed to start on port ${APP_PORT}"
+                        exit 1
+                    fi
                 """
             }
         }
@@ -63,10 +66,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment Successful!"
+            echo "✅ Deployment succeeded"
         }
         failure {
-            echo "❌ Deployment Failed"
+            echo "❌ Deployment failed"
         }
     }
 }
