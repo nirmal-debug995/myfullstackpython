@@ -4,36 +4,33 @@ pipeline {
     environment {
         APP_DIR = "/var/lib/jenkins/workspace/Flask-chat-app"
         VENV_DIR = "${APP_DIR}/venv"
-        FLASK_LOG = "${APP_DIR}/flask.log"
-        PORT = "5000"
+        APP_PORT = "5000"
+        LOG_FILE = "${APP_DIR}/flask.log"
+        CRED_ID = "github-ssh-key" // Your Jenkins SSH credential ID
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('Checkout SCM') {
             steps {
-                sshagent(['git']) {
-                    sh """
-                    cd $APP_DIR
-                    git fetch --all
-                    git reset --hard origin/main
-                    """
-                }
+                checkout([$class: 'GitSCM', 
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'git@github.com:nirmal-debug995/myfullstackpython.git',
+                        credentialsId: "${CRED_ID}"
+                    ]]
+                ])
             }
         }
 
         stage('Setup Environment') {
             steps {
                 sh """
-                cd $APP_DIR
-                # Remove old virtual environment if exists
-                rm -rf $VENV_DIR
-                # Create a new virtual environment
-                python3 -m venv $VENV_DIR
-                # Activate venv
-                . $VENV_DIR/bin/activate
-                # Upgrade pip and install dependencies
-                pip install --upgrade pip
-                pip install -r requirements.txt
+                    cd ${APP_DIR}
+                    rm -rf ${VENV_DIR}
+                    python3 -m venv ${VENV_DIR}
+                    . ${VENV_DIR}/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
                 """
             }
         }
@@ -41,14 +38,13 @@ pipeline {
         stage('Stop Old App') {
             steps {
                 sh """
-                # Kill any process using the port
-                OLD_PID=\$(lsof -t -i:$PORT)
-                if [ -n "\$OLD_PID" ]; then
-                    echo "Stopping old Flask app (PID \$OLD_PID)"
-                    kill -9 \$OLD_PID
-                else
-                    echo "No old Flask app running on port $PORT"
-                fi
+                    OLD_PID=\$(lsof -t -i:${APP_PORT})
+                    if [ ! -z "\$OLD_PID" ]; then
+                        kill -9 \$OLD_PID
+                        echo "Stopped old app with PID \$OLD_PID"
+                    else
+                        echo "No old app running on port ${APP_PORT}"
+                    fi
                 """
             }
         }
@@ -56,10 +52,10 @@ pipeline {
         stage('Start App') {
             steps {
                 sh """
-                cd $APP_DIR
-                . $VENV_DIR/bin/activate
-                echo "Starting Flask app on port $PORT"
-                nohup python app.py --host=0.0.0.0 --port=$PORT > $FLASK_LOG 2>&1 &
+                    cd ${APP_DIR}
+                    . ${VENV_DIR}/bin/activate
+                    nohup python app.py --host=0.0.0.0 --port=${APP_PORT} > ${LOG_FILE} 2>&1 &
+                    echo "Flask app started on port ${APP_PORT}, logs in ${LOG_FILE}"
                 """
             }
         }
@@ -67,7 +63,7 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment Successful"
+            echo "✅ Deployment Successful!"
         }
         failure {
             echo "❌ Deployment Failed"
